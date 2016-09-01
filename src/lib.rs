@@ -38,6 +38,7 @@ extern {
 #[link(name = "ldap_r")]
 #[allow(improper_ctypes)]
 extern {
+    static ber_pvt_opt_on: c_char;
 	fn ldap_initialize(ldap: *mut *mut LDAP, uri: *const c_char) -> c_int;
 	fn ldap_memfree(p: *mut c_void);
 	fn ldap_msgfree(msg: *mut LDAPMessage) -> c_int;
@@ -47,7 +48,7 @@ extern {
 	fn ldap_get_values(ldap: *mut LDAP, entry: *mut LDAPMessage, attr: *const c_char) -> *const *const c_char;
 	fn ldap_count_values(vals: *const *const c_char) -> c_int;
 	fn ldap_value_free(vals: *const *const c_char);
-
+    fn ldap_set_option(ldap: *const LDAP, option: c_int, invalue: *const c_void) -> c_int;
 	fn ldap_simple_bind_s(ldap: *mut LDAP, who: *const c_char, pass: *const c_char) -> c_int;
 	fn ldap_first_attribute(ldap: *mut LDAP, entry: *mut LDAPMessage, berptr: *mut *mut BerElement) -> *const c_char;
 	fn ldap_next_attribute(ldap: *mut LDAP, entry: *mut LDAPMessage, berptr: *mut BerElement) -> *const c_char;
@@ -56,7 +57,6 @@ extern {
 						 attrsonly: c_int, serverctrls: *mut *mut LDAPControl,
 						 clientctrls: *mut *mut LDAPControl, timeout: *mut timeval,
 						 sizelimit: c_int, res: *mut *mut LDAPMessage) -> c_int;
-
 	fn ldap_unbind_ext_s(ldap: *mut LDAP, sctrls: *mut *mut LDAPControl, cctrls: *mut *mut LDAPControl) -> c_int;
 }
 
@@ -66,38 +66,86 @@ extern {
 /// represented as a map of attributes to list of values.
 ///
 pub type LDAPResponse = Vec<HashMap<String,Vec<String>>>;
+
+
+/// A high level abstraction over the raw OpenLDAP functions.
+///
+/// A `RustLDAP` object hides raw OpenLDAP complexities and exposes a simple object that is
+/// created, configured, and queried. Methods that call underlying OpenLDAP calls that can fail
+/// will raise an `errors::LDAPError` with additional details.
+///
+/// Using a `RustLDAP` object is easy!
+///
 pub struct RustLDAP {
-	// Have the raw pointer to it so we can pass it into internal functions
-	ldap_ptr: *mut LDAP
+    /// A pointer to the underlying OpenLDAP object.
+	ldap_ptr: *mut LDAP,
 }
 
 impl Drop for RustLDAP {
-
 	fn drop(&mut self){
-
-		//unbind the LDAP connection, making the C library free the LDAP*
+		// Unbind the LDAP connection, making the C library free the LDAP*.
 		let rc = unsafe { ldap_unbind_ext_s(self.ldap_ptr, ptr::null_mut(), ptr::null_mut()) };
 
-		//make sure it actually happened
+		// Make sure it actually happened.
 		if rc != codes::results::LDAP_SUCCESS {
-			unsafe { //hopefully this never happens
+			unsafe {
+                // Hopefully this never happens.
 				let raw_estr = ldap_err2string(rc as c_int);
 				panic!(CStr::from_ptr(raw_estr).to_owned().into_string().unwrap());
 			}
-
 		}
-
 	}
-
 }
 
-impl RustLDAP {
-	/// Create a new RustLDAP struct and use an ffi call to ldap_initialize to
-	/// allocate and init a C LDAP struct. All of that is hidden inside of RustLDAP.
-	pub fn new(uri: &str) -> Result<RustLDAP, String> {
+/// A trait for types that can be passed as LDAP option values.
+///
+/// Underlying OpenLDAP implementation calls for option values to be passed in as *const c_void,
+/// while allowing values to be i32 or string. Using traits, we implement function overloading to
+/// handle i32 and string option value types.
+///
+pub trait LDAPOptionValue {
+    fn as_cvoid_ptr(&self) -> *const c_void;
+}
 
-		//attempt to convert the URI string into a C-string
-		let uri_cstring = CString::new(uri).unwrap();
+impl LDAPOptionValue for str {
+    fn as_cvoid_ptr(&self) -> *const c_void {
+        let string = CString::new(self).unwrap();
+        unsafe {
+            return mem::transmute(string.as_ptr());
+        }
+    }
+}
+
+impl LDAPOptionValue for i32 {
+    fn as_cvoid_ptr(&self) -> *const c_void {
+        unsafe {
+            return mem::transmute(&self);
+        }
+    }
+}
+
+impl LDAPOptionValue for bool {
+    fn as_cvoid_ptr(&self) -> *const c_void {
+        match *self {
+            true => {
+                unsafe {
+                    return mem::transmute(&ber_pvt_opt_on)
+                }
+            },
+            false => {
+                unsafe {
+                    return mem::transmute(&0);
+                }
+            }
+        }
+    }
+}
+
+impl LDAPOptionValue for *const c_void {
+    fn as_cvoid_ptr(&self) -> *const c_void {
+        *self
+    }
+}
 
 impl RustLDAP {
     /// Creat a new RustLDAP.
@@ -116,8 +164,9 @@ impl RustLDAP {
 		// Create some space for the LDAP pointer.
 		let mut cldap = ptr::null_mut();
 
+		let uri_cstring = CString::new(uri).unwrap();
+
 		unsafe {
-			//call ldap_initialize and check for errors
 			let res = ldap_initialize(&mut cldap, uri_cstring.as_ptr());
 			if res != codes::results::LDAP_SUCCESS {
 				let raw_estr = ldap_err2string(res as c_int);
@@ -126,10 +175,31 @@ impl RustLDAP {
 
 		}
 
-		//create and return a new instance
-		let new_ldap = RustLDAP { ldap_ptr: cldap };
-		return Ok(new_ldap);
+        let new_ldap = RustLDAP {
+            ldap_ptr: cldap,
+        };
+        return Ok(new_ldap);
 	}
+
+    /// Sets an option on the LDAP connection.
+    ///
+    /// When setting an option to _ON_ or _OFF_ one may use the boolean values `true` or `false`,
+    /// respectively.
+    ///
+    /// # Parameters
+    ///
+    /// * option - An option identifier from `cldap::codes`.
+    /// * value - The value to set for the option.
+    ///
+    pub fn set_option<T: LDAPOptionValue + ?Sized>(&self, option: i32, value: &T) -> bool {
+        unsafe {
+            return ldap_set_option(
+                self.ldap_ptr,
+                option,
+                value.as_cvoid_ptr(),
+            ) == 0;
+        }
+    }
 
     /// Bind to the LDAP server.
     ///
@@ -213,7 +283,7 @@ impl RustLDAP {
 		// Make room for the LDAPMessage, being sure to delete this before we return.
 		let mut ldap_msg = ptr::null_mut();;
 
-		//Convert the passed in filter sting to either a C-string or null if one is not passed
+		// Convert the passed in filter sting to either a C-string or null if one is not passed.
 		let filter_cstr: CString;
 		let r_filter = match filter {
 			Some(fs) => {
@@ -288,41 +358,42 @@ impl RustLDAP {
 
 				while !attr.is_null() {
 
-					//convert the attribute into a Rust string
+					// Convert the attribute into a Rust string.
 					let key = CStr::from_ptr(attr).to_owned().into_string().unwrap();
 
-					//get the attribute values from LDAP
+					// Get the attribute values from LDAP.
 					let raw_vals: *const *const c_char = ldap_get_values(self.ldap_ptr, entry, attr);
 					let raw_vals_len = ldap_count_values(raw_vals) as usize;
 					let val_slice: &[*const c_char] = slice::from_raw_parts(raw_vals, raw_vals_len);
 
-					//map these into a vec of Strings
+					// Map these into a vector of Strings.
 					let values: Vec<String> = val_slice.iter().map(|ptr| {
-						CStr::from_ptr(*ptr).to_owned().into_string().unwrap()
+                        // TODO(sholsapp): If this contains binary data this will fail.
+						CStr::from_ptr(*ptr).to_owned().into_string().unwrap_or("<cannot parse bindary data yet.>".to_string())
 					}).collect();
 
-					//insert newly constructed Rust key-value strings
+					// Insert newly constructed Rust key-value strings.
 					map.insert(key, values);
 
-					//free the attr and value, then get next attr
+					// Free the attr and value, then get next attr.
 					ldap_value_free(raw_vals);
 					ldap_memfree(attr as *mut c_void);
 					attr = ldap_next_attribute(self.ldap_ptr, entry, ber)
 
 				}
 
-				//free the BerElement and advance to the next entry
+				// Free the BerElement and advance to the next entry.
 				ber_free(ber, 0);
 				entry = ldap_next_entry(self.ldap_ptr, entry);
 
 			}
 
-			//push this entry into the vec
+			// Push this entry into the vector.
 			resvec.push(map);
 
 		}
 
-		//make sure we free the message and return the parsed results
+		// Make sure we free the message and return the parsed results.
 		unsafe { ldap_msgfree(ldap_msg) };
 		return Ok(resvec);
 	}
