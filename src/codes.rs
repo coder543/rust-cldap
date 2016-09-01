@@ -1,3 +1,6 @@
+//! LDAP codes from transcribed from ldap.h.
+//!
+
 /// Re-export protocol result codes from ldap.h
 pub mod results {
     pub static LDAP_SUCCESS: i32                        = 0x00;
@@ -148,4 +151,17 @@ pub mod options {
     pub static LDAP_OPT_SECURITY_CONTEXT: i32           = 0x0099;
 
     pub static LDAP_OPT_API_EXTENSION_BASE: i32         = 0x4000;
+
+    pub static LDAP_OPT_X_TLS_CACERTDIR: i32            = 0x6003;
+    pub static LDAP_OPT_X_TLS_CACERTFILE: i32           = 0x6002;
+    pub static LDAP_OPT_X_TLS_CERTFILE: i32             = 0x6004;
+    pub static LDAP_OPT_X_TLS_KEYFILE: i32              = 0x6005;
+    pub static LDAP_OPT_X_TLS_NEWCTX: i32               = 0x600f;
+    pub static LDAP_OPT_X_TLS_REQUIRE_CERT: i32         = 0x6006;
+
+    pub static LDAP_OPT_X_TLS_NEVER: i32                = 0x0000;
+    pub static LDAP_OPT_X_TLS_HARD: i32                 = 0x0001;
+    pub static LDAP_OPT_X_TLS_DEMAND: i32               = 0x0002;
+    pub static LDAP_OPT_X_TLS_ALLOW: i32                = 0x0003;
+    pub static LDAP_OPT_X_TLS_TRY: i32                  = 0x0004;
 }
