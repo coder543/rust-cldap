@@ -1,19 +1,28 @@
+//! Objects for connecting and querying LDAP servers using OpenLDAP.
+//!
+//! Current support includes connection, initializing, binding, configuring, and search against an
+//! LDAP directory.
+//!
 extern crate libc;
 use libc::{c_int, c_char, c_void, timeval};
-use std::ptr;
-use std::ffi::{CStr, CString};
 use std::collections::HashMap;
+use std::ffi::{CStr, CString};
+use std::mem;
+use std::ptr;
 use std::slice;
 
 pub mod codes;
+pub mod errors;
 
-// Define the structs used by the ldap c library.
 #[repr(C)]
 struct LDAP;
+
 #[repr(C)]
 struct LDAPMessage;
+
 #[repr(C)]
 pub struct LDAPControl;
+
 #[repr(C)]
 struct BerElement;
 
@@ -51,6 +60,12 @@ extern {
 	fn ldap_unbind_ext_s(ldap: *mut LDAP, sctrls: *mut *mut LDAPControl, cctrls: *mut *mut LDAPControl) -> c_int;
 }
 
+/// A typedef for an LDAPResponse type.
+///
+/// LDAP responses are organized as vectors of mached entities. Typically, each entity is
+/// represented as a map of attributes to list of values.
+///
+pub type LDAPResponse = Vec<HashMap<String,Vec<String>>>;
 pub struct RustLDAP {
 	// Have the raw pointer to it so we can pass it into internal functions
 	ldap_ptr: *mut LDAP
@@ -84,7 +99,21 @@ impl RustLDAP {
 		//attempt to convert the URI string into a C-string
 		let uri_cstring = CString::new(uri).unwrap();
 
-		//Create some space for the LDAP*
+impl RustLDAP {
+    /// Creat a new RustLDAP.
+    ///
+    /// Creates a new RustLDAP and initializes underlying OpenLDAP library. Upon creation, a
+    /// subsequent calls to `set_option` and `simple_bind` are possible. Before calling a search
+    /// related function, one must bind to the server by calling `simple_bind`. See module usage
+    /// information for more details on using a RustLDAP object.
+    ///
+    /// # Parameters
+    ///
+    /// * uri - URI of the LDAP server to connect to. E.g., ldaps://localhost:636.
+    ///
+	pub fn new(uri: &str) -> Result<RustLDAP, errors::LDAPError> {
+
+		// Create some space for the LDAP pointer.
 		let mut cldap = ptr::null_mut();
 
 		unsafe {
@@ -92,7 +121,7 @@ impl RustLDAP {
 			let res = ldap_initialize(&mut cldap, uri_cstring.as_ptr());
 			if res != codes::results::LDAP_SUCCESS {
 				let raw_estr = ldap_err2string(res as c_int);
-				return Err(CStr::from_ptr(raw_estr).to_owned().into_string().unwrap());
+				return Err(errors::LDAPError::NativeError(CStr::from_ptr(raw_estr).to_owned().into_string().unwrap()));
 			}
 
 		}
@@ -102,39 +131,86 @@ impl RustLDAP {
 		return Ok(new_ldap);
 	}
 
-	/// Perform a synchronos simple bind (ldap_simple_bind_s). The result is
-	/// either Ok(LDAP_SUCCESS) or Err(ldap_err2string).
-	pub fn simple_bind(&self, who: &str, pass: &str) -> Result<i32, String> {
-
-		//convert arguments to C-strings
-		let who_cstr 	= CString::new(who).unwrap();
-		let pass_cstr 	= CString::new(pass).unwrap();
-		let who_ptr 	= who_cstr.as_ptr();
-		let pass_ptr 	= pass_cstr.as_ptr();
-
-		//call ldap_bind and check for errors
-		unsafe {
+    /// Bind to the LDAP server.
+    ///
+    /// If you wish to configure options on the LDAP server, be sure to set required options using
+    ///`set_option` _before_ binding to the LDAP server. In some advanced cases, it may be required
+    /// to set multiple options for an option to be made available. Refer to the OpenLDAP
+    /// documentation for information on available options and how to use them.
+    ///
+    /// # Parameters
+    ///
+    /// * who - The user's name to bind with.
+    /// * pass - The user's password to bind with.
+    ///
+	pub fn simple_bind(&self, who: &str, pass: &str) -> Result<i32, errors::LDAPError> {
+		let who_cstr = CString::new(who).unwrap();
+		let pass_cstr = CString::new(pass).unwrap();
+		let who_ptr = who_cstr.as_ptr();
+		let pass_ptr = pass_cstr.as_ptr();
+        unsafe {
 			let res = ldap_simple_bind_s(self.ldap_ptr, who_ptr, pass_ptr);
 			if res < 0 {
 				let raw_estr = ldap_err2string(res as c_int);
-				return Err(CStr::from_ptr(raw_estr).to_owned().into_string().unwrap());
+				return Err(errors::LDAPError::NativeError(CStr::from_ptr(raw_estr).to_owned().into_string().unwrap()));
 			}
 			return Ok(res);
 		}
 	}
 
-	/// Perform a simple search with only the base, returning all attributes found
-	pub fn simple_search(&self, base: &str, scope: i32) -> Result<Vec<HashMap<String,Vec<String>>>, String> {
-		return self.ldap_search(base, scope, None, None, false, None, None, ptr::null_mut(), -1);
+	/// Simple synchronous search.
+    ///
+    /// Performs a simple search with only the base, returning all attributes found.
+    ///
+    /// # Parameters
+    ///
+    /// * base - The LDAP base.
+    /// * scope - The search scope. See `cldap::codes::scopes`.
+    ///
+	pub fn simple_search(&self, base: &str, scope: i32) -> Result<LDAPResponse, errors::LDAPError> {
+		return self.ldap_search(
+            base,
+            scope,
+            None,
+            None,
+            false,
+            None,
+            None,
+            ptr::null_mut(),
+            -1,
+        );
 	}
 
-	/// Expose a not very 'rust-y' api for ldap_search_ext_s. Ideally this will
-	/// be used mainly internally and a simpler api is exposed to users.
-	pub fn ldap_search(&self, base: &str, scope: i32, filter: Option<&str>, attrs: Option<Vec<&str>>, attrsonly: bool,
-						serverctrls: Option<*mut *mut LDAPControl>, clientctrls: Option<*mut *mut LDAPControl>,
-						timeout: *mut timeval, sizelimit: i32) -> Result<Vec<HashMap<String,Vec<String>>>, String> {
+    /// Advanced synchronous search.
+    ///
+    /// Exposes a raw API around the underlying `ldap_search_ext_s` function from OpenLDAP.
+    /// Wherever possible, use provided wrappers.
+    ///
+    /// # Parameters
+    ///
+    /// * base - The base domain.
+    /// * scope - The search scope. See `cldap::codes::scopes`.
+    /// * filter - An optional filter.
+    /// * attrs - An optional set of attrs.
+    /// * attrsonly - True if should return only the attrs specified in `attrs`.
+    /// * serverctrls - Optional sever controls.
+    /// * clientctrls - Optional client controls.
+    /// * timeout - A timeout.
+    /// * sizelimit - The maximum number of entities to return, or -1 for no limit.
+    ///
+	pub fn ldap_search(&self,
+                       base: &str,
+                       scope: i32,
+                       filter: Option<&str>,
+                       attrs: Option<Vec<&str>>,
+                       attrsonly: bool,
+					   serverctrls: Option<*mut *mut LDAPControl>,
+                       clientctrls: Option<*mut *mut LDAPControl>,
+					   timeout: *mut timeval,
+                       sizelimit: i32)
+            -> Result<LDAPResponse, errors::LDAPError> {
 
-		//Make room for the LDAPMessage, being sure to delete this before we return
+		// Make room for the LDAPMessage, being sure to delete this before we return.
 		let mut ldap_msg = ptr::null_mut();;
 
 		//Convert the passed in filter sting to either a C-string or null if one is not passed
@@ -147,57 +223,64 @@ impl RustLDAP {
 			None => ptr::null()
 		};
 
-		//Convert the vec of attributes into the null-terminated array that the library expects
-		//We also copy the strings into C-strings
+		// Convert the vec of attributes into the null-terminated array that the library expects.
 		let mut r_attrs: *const *const c_char = ptr::null();
 		let mut c_strs: Vec<CString> = Vec::new();
 		let mut r_attrs_ptrs: Vec<*const c_char> = Vec::new();
 
 		if let Some(strs) = attrs {
 			for string in strs {
-
-				//create new CString and take ownership of it in c_strs
+				// Create new CString and take ownership of it in c_strs.
 				c_strs.push(CString::new(string).unwrap());
-
-				//create a pointer to that CString's raw data and store it in r_attrs
+				// Create a pointer to that CString's raw data and store it in r_attrs.
 				r_attrs_ptrs.push(c_strs[c_strs.len() - 1].as_ptr());
 			}
-			r_attrs_ptrs.push(ptr::null()); //ensure that there is a null value at the end of the vec
+            // Ensure that there is a null value at the end of the vector.
+			r_attrs_ptrs.push(ptr::null());
 			r_attrs = r_attrs_ptrs.as_ptr();
 		}
 
-		//PAss in either the controlls or a null if none are specified
 		let r_serverctrls = match serverctrls {
 			Some(sc) => sc,
 			None => ptr::null_mut()
 		};
+
 		let r_clientctrls = match clientctrls {
 			Some(cc) => cc,
 			None => ptr::null_mut()
 		};
 
-		//Copy the search base into a C-string
 		let base = CString::new(base).unwrap();
 
-		//call into the C library and check for error
 		unsafe {
-			let res: i32 = ldap_search_ext_s(self.ldap_ptr, base.as_ptr(), scope as c_int, r_filter, r_attrs, attrsonly as c_int,
-												r_serverctrls, r_clientctrls, timeout, sizelimit as c_int, &mut ldap_msg);
+			let res: i32 = ldap_search_ext_s(
+                self.ldap_ptr,
+                base.as_ptr(),
+                scope as c_int,
+                r_filter,
+                r_attrs,
+                attrsonly as c_int,
+				r_serverctrls,
+                r_clientctrls,
+                timeout,
+                sizelimit as c_int,
+                &mut ldap_msg,
+            );
 			if res != codes::results::LDAP_SUCCESS {
 				let raw_estr = ldap_err2string(res as c_int);
-				return Err(CStr::from_ptr(raw_estr).to_owned().into_string().unwrap());
+				return Err(errors::LDAPError::NativeError(CStr::from_ptr(raw_estr).to_owned().into_string().unwrap()));
 			}
 		}
 
-		//We now have to parse the results, copying the C-strings into Rust ones
-		//making sure to free the C-strings afterwards
+        // We now have to parse the results, copying the C-strings into Rust ones making sure to
+        // free the C-strings afterwards
 		let mut resvec: Vec<HashMap<String,Vec<String>>> = vec![];
 		let mut entry = unsafe { ldap_first_entry(self.ldap_ptr, ldap_msg) };
 
 		while !entry.is_null() {
 
-			//Make the map holding the attribute : value pairs
-			//as well as the BerElement that keeps track of what position we're in
+            // Make the map holding the attribute : value pairs as well as the BerElement that keeps
+            // track of what position we're in
 			let mut map: HashMap<String,Vec<String>> = HashMap::new();
 			let mut ber: *mut BerElement = ptr::null_mut();
 			unsafe {
@@ -262,33 +345,23 @@ mod tests {
 	/// Test creating a RustLDAP struct with a valid uri.
 	#[test]
 	fn test_ldap_new(){
-
 		let _ = super::RustLDAP::new(TEST_ADDRESS).unwrap();
-
 	}
 
 	/// Test creating a RustLDAP struct with an invalid uri.
 	#[test]
 	fn test_invalid_ldap_new(){
-
 		if let Err(e) = super::RustLDAP::new("lda://localhost"){
-
-			assert_eq!("Bad parameter to an ldap routine", e);
-
+			assert_eq!(super::errors::LDAPError::NativeError("Bad parameter to an ldap routine".to_string()), e);
 		} else {
-
 			assert!(false);
-
 		}
-
 	}
 
 	#[test]
 	#[should_panic]
 	fn test_invalid_cstring_ldap_new(){
-
 		let _ = super::RustLDAP::new("INVALID\0CSTRING").unwrap();
-
 	}
 
 	#[test]
