@@ -30,7 +30,7 @@ fn main() {
 
     println!(ldap.simple_search(
         "CN=Stephen,OU=People,DC=Earth",
-	codes::scopes::LDAP_SCOPE_BASE,
+        codes::scopes::LDAP_SCOPE_BASE,
     ));
 }
 ```
