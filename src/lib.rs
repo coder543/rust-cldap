@@ -7,9 +7,9 @@ extern crate libc;
 use libc::{c_int, c_char, c_void, timeval};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
-use std::mem;
 use std::ptr;
 use std::slice;
+use std::boxed;
 
 pub mod codes;
 pub mod errors;
@@ -103,6 +103,13 @@ impl Drop for RustLDAP {
 /// while allowing values to be i32 or string. Using traits, we implement function overloading to
 /// handle i32 and string option value types.
 ///
+/// This trait allocates memory that a caller must free using `std::boxed::Box::from_raw`. This
+/// helps guarantee that there is not a use after free bug (in Rust) while providing the appearance
+/// of opaque memory to OpenLDAP (in C). In pure C, we would've accomplished this by casting a
+/// local variable to a `const void *`. In Rust, we must do this on the heap to ensure Rust's
+/// ownership system does not free the memory used to store the option value between now and when
+/// the option is actually set.
+///
 pub trait LDAPOptionValue {
     fn as_cvoid_ptr(&self) -> *const c_void;
 }
@@ -110,17 +117,14 @@ pub trait LDAPOptionValue {
 impl LDAPOptionValue for str {
     fn as_cvoid_ptr(&self) -> *const c_void {
         let string = CString::new(self).unwrap();
-        unsafe {
-            return mem::transmute(string.as_ptr());
-        }
+        string.into_raw() as *const c_void
     }
 }
 
 impl LDAPOptionValue for i32 {
     fn as_cvoid_ptr(&self) -> *const c_void {
-        unsafe {
-            return mem::transmute(&self);
-        }
+        let mem = boxed::Box::new(*self);
+        boxed::Box::into_raw(mem) as *const c_void
     }
 }
 
@@ -128,22 +132,14 @@ impl LDAPOptionValue for bool {
     fn as_cvoid_ptr(&self) -> *const c_void {
         match *self {
             true => {
-                unsafe {
-                    return mem::transmute(&ber_pvt_opt_on)
-                }
+                let mem = boxed::Box::new(&ber_pvt_opt_on);
+                boxed::Box::into_raw(mem) as *const c_void
             },
             false => {
-                unsafe {
-                    return mem::transmute(&0);
-                }
+                let mem = boxed::Box::new(0);
+                boxed::Box::into_raw(mem) as *const c_void
             }
         }
-    }
-}
-
-impl LDAPOptionValue for *const c_void {
-    fn as_cvoid_ptr(&self) -> *const c_void {
-        *self
     }
 }
 
@@ -192,13 +188,19 @@ impl RustLDAP {
     /// * value - The value to set for the option.
     ///
     pub fn set_option<T: LDAPOptionValue + ?Sized>(&self, option: i32, value: &T) -> bool {
+        let ptr: *const c_void = value.as_cvoid_ptr();
         unsafe {
-            return ldap_set_option(
+            let res: i32;
+            res = ldap_set_option(
                 self.ldap_ptr,
                 option,
-                value.as_cvoid_ptr(),
-            ) == 0;
+                ptr,
+            );
+            // Allows for memory to be dropped when this binding goes away.
+            let _ = boxed::Box::from_raw(ptr as *mut c_void);
+            return res == 0
         }
+
     }
 
     /// Bind to the LDAP server.
