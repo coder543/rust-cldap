@@ -1,6 +1,6 @@
 # openldap
 
-[![Travis](https://secure.travis-ci.org/sholsapp/rust-cldap.png?branch=master)](https://travis-ci.org/sholsapp/rust-cldap)
+[![Build Status](https://travis-ci.org/sholsapp/rust-cldap.svg?branch=master)](https://travis-ci.org/sholsapp/rust-cldap)
 
 Rust bindings for the native OpenLDAP library with a few convenient
 abstractions for connecting, binding, configuring, and querying your LDAP
