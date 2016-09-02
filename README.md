@@ -29,10 +29,10 @@ fn main() {
     try!(ldap.simple_bind(LDAP_USER, LDAP_PASS));
 
     // returns a LDAPResponse, a.k.a. Vec<HashMap<String,Vec<String>>>;
-    println!(ldap.simple_search(
+    let res = ldap.simple_search(
         "CN=Stephen,OU=People,DC=Earth",
         codes::scopes::LDAP_SCOPE_BASE,
-    ));
+    ).unwrap();
 }
 ```
 
