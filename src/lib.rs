@@ -45,6 +45,7 @@ extern {
     fn ldap_err2string(err: c_int) -> *const c_char;
     fn ldap_first_entry(ldap: *mut LDAP, result: *mut LDAPMessage) -> *mut LDAPMessage;
     fn ldap_next_entry(ldap: *mut LDAP, entry: *mut LDAPMessage) -> *mut LDAPMessage;
+    fn ldap_get_dn(ldap: *mut LDAP, entry: *mut LDAPMessage) -> *const c_char;
     fn ldap_get_values(ldap: *mut LDAP, entry: *mut LDAPMessage, attr: *const c_char) -> *const *const c_char;
     fn ldap_count_values(vals: *const *const c_char) -> c_int;
     fn ldap_value_free(vals: *const *const c_char);
@@ -360,6 +361,13 @@ impl RustLDAP {
             let mut map: HashMap<String,Vec<String>> = HashMap::new();
             let mut ber: *mut BerElement = ptr::null_mut();
             unsafe {
+                // Populate the "DN" of the user
+                let raw_dn = ldap_get_dn(self.ldap_ptr, entry);
+                let mut dn: Vec<String> = Vec::new();
+                dn.push(CStr::from_ptr(raw_dn).to_owned().into_string().unwrap_or("<Invalid DN>".to_string()));
+                map.insert("dn".to_string(), dn);
+                ldap_memfree(raw_dn as *mut c_void);
+
                 let mut attr: *const c_char = ldap_first_attribute(self.ldap_ptr, entry, &mut ber);
 
                 while !attr.is_null() {
@@ -385,7 +393,6 @@ impl RustLDAP {
                     ldap_value_free(raw_vals);
                     ldap_memfree(attr as *mut c_void);
                     attr = ldap_next_attribute(self.ldap_ptr, entry, ber)
-
                 }
 
                 // Free the BerElement and advance to the next entry.
