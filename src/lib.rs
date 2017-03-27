@@ -468,6 +468,9 @@ mod tests {
         //make sure we got something back
         assert!(search_res.len() == 1);
 
+        // make sure the DN is searched and returned correctly
+        assert_eq!(search_res[0]["dn"][0], "uid=tesla,dc=example,dc=com");
+
         for result in search_res {
             println!("simple search result: {:?}", result);
             for (key, value) in result {
@@ -491,6 +494,9 @@ mod tests {
 
         //make sure we got something back
         assert!(search_res.len() == 1);
+
+        // make sure the DN is searched and returned correctly
+        assert_eq!(search_res[0]["dn"][0], "uid=euler,dc=example,dc=com");
 
         for result in search_res {
             println!("search result: {:?}", result);
