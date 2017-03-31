@@ -475,9 +475,10 @@ mod tests {
 
     #[test]
     fn test_simple_bind() {
-
         let ldap = super::RustLDAP::new(TEST_ADDRESS).unwrap();
+        assert!(ldap.set_option(codes::options::LDAP_OPT_PROTOCOL_VERSION, &3));
         let res = ldap.simple_bind(TEST_BIND_DN, TEST_BIND_PASS).unwrap();
+        assert_eq!(codes::results::LDAP_SUCCESS, res);
         println!("Bind result: {:?}", res);
 
     }
@@ -487,7 +488,9 @@ mod tests {
 
         println!("Testing simple search");
         let ldap = super::RustLDAP::new(TEST_ADDRESS).unwrap();
-        let _ = ldap.simple_bind(TEST_BIND_DN, TEST_BIND_PASS).unwrap();
+        assert!(ldap.set_option(codes::options::LDAP_OPT_PROTOCOL_VERSION, &3));
+        let res = ldap.simple_bind(TEST_BIND_DN, TEST_BIND_PASS).unwrap();
+        assert_eq!(codes::results::LDAP_SUCCESS, res);
         let search_res =
             ldap.simple_search(TEST_SIMPLE_SEARCH_QUERY, codes::scopes::LDAP_SCOPE_BASE).unwrap();
 
@@ -514,7 +517,9 @@ mod tests {
 
         println!("Testing search");
         let ldap = super::RustLDAP::new(TEST_ADDRESS).unwrap();
-        let _ = ldap.simple_bind(TEST_BIND_DN, TEST_BIND_PASS).unwrap();
+        assert!(ldap.set_option(codes::options::LDAP_OPT_PROTOCOL_VERSION, &3));
+        let res = ldap.simple_bind(TEST_BIND_DN, TEST_BIND_PASS).unwrap();
+        assert_eq!(codes::results::LDAP_SUCCESS, res);
         let search_res = ldap.ldap_search(TEST_SEARCH_BASE,
                                           codes::scopes::LDAP_SCOPE_SUB,
                                           Some(TEST_SEARCH_FILTER),
@@ -549,7 +554,9 @@ mod tests {
 
         println!("Testing invalid search");
         let ldap = super::RustLDAP::new(TEST_ADDRESS).unwrap();
-        let _ = ldap.simple_bind(TEST_BIND_DN, TEST_BIND_PASS).unwrap();
+        assert!(ldap.set_option(codes::options::LDAP_OPT_PROTOCOL_VERSION, &3));
+        let res = ldap.simple_bind(TEST_BIND_DN, TEST_BIND_PASS).unwrap();
+        assert_eq!(codes::results::LDAP_SUCCESS, res);
         let search_res = ldap.ldap_search(TEST_SEARCH_BASE,
                                           codes::scopes::LDAP_SCOPE_SUB,
                                           Some(TEST_SEARCH_INVALID_FILTER),
@@ -572,7 +579,9 @@ mod tests {
         println!("Testing search with attrs");
         let test_search_attrs_vec = vec!["cn", "sn", "mail"];
         let ldap = super::RustLDAP::new(TEST_ADDRESS).unwrap();
-        let _ = ldap.simple_bind(TEST_BIND_DN, TEST_BIND_PASS).unwrap();
+        assert!(ldap.set_option(codes::options::LDAP_OPT_PROTOCOL_VERSION, &3));
+        let res = ldap.simple_bind(TEST_BIND_DN, TEST_BIND_PASS).unwrap();
+        assert_eq!(codes::results::LDAP_SUCCESS, res);
         let search_res = ldap.ldap_search(TEST_SEARCH_BASE,
                                           codes::scopes::LDAP_SCOPE_SUB,
                                           Some(TEST_SEARCH_FILTER),
@@ -605,7 +614,9 @@ mod tests {
         println!("Testing search with invalid attrs");
         let test_search_attrs_vec = vec!["cn", "sn", "mail", "INVALID"];
         let ldap = super::RustLDAP::new(TEST_ADDRESS).unwrap();
-        let _ = ldap.simple_bind(TEST_BIND_DN, TEST_BIND_PASS).unwrap();
+        assert!(ldap.set_option(codes::options::LDAP_OPT_PROTOCOL_VERSION, &3));
+        let res = ldap.simple_bind(TEST_BIND_DN, TEST_BIND_PASS).unwrap();
+        assert_eq!(codes::results::LDAP_SUCCESS, res);
         let search_res = ldap.ldap_search(TEST_SEARCH_BASE,
                                           codes::scopes::LDAP_SCOPE_SUB,
                                           Some(TEST_SEARCH_FILTER),
