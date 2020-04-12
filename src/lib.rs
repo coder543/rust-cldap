@@ -4,7 +4,7 @@
 //! LDAP directory.
 //!
 extern crate libc;
-use errors::LDAPError;
+
 use libc::{c_char, c_int, c_void, timeval};
 use std::boxed;
 use std::collections::HashMap;
@@ -28,6 +28,7 @@ pub struct LDAPControl;
 struct BerElement;
 
 unsafe impl Sync for LDAP {}
+
 unsafe impl Send for LDAP {}
 
 #[link(name = "lber")]
@@ -112,6 +113,7 @@ pub struct RustLDAP {
 }
 
 unsafe impl Sync for RustLDAP {}
+
 unsafe impl Send for RustLDAP {}
 
 impl Drop for RustLDAP {
@@ -513,7 +515,7 @@ impl RustLDAP {
 ///     assert_eq!(safe_filter_value, r"doesnotmatter\29\28isMemberOf=cn=admins,ou=groups,ou=example,ou=org\29\28doesnotmatter=")
 /// }
 /// ```
-pub fn escape_filter_assertion_value(input: &str) -> Result<String, LDAPError> {
+pub fn escape_filter_assertion_value(input: &str) -> Vec<u8> {
     fn to_hex(byte: u8) -> u8 {
         match byte {
             0..=9 => b'0' + byte,
@@ -521,31 +523,27 @@ pub fn escape_filter_assertion_value(input: &str) -> Result<String, LDAPError> {
         }
     }
 
-    String::from_utf8(
-        input
-            .bytes()
-            .flat_map(|c| match c {
-                b'\0' => vec![b'\\', b'0', b'0'],
-                b'!' => vec![b'\\', b'2', b'1'],
-                b'&' => vec![b'\\', b'2', b'6'],
-                b'(' => vec![b'\\', b'2', b'8'],
-                b')' => vec![b'\\', b'2', b'9'],
-                b'*' => vec![b'\\', b'2', b'a'],
-                b'\\' => vec![b'\\', b'5', b'c'],
-                b':' => vec![b'\\', b'3', b'a'],
-                b'|' => vec![b'\\', b'7', b'c'],
-                b'~' => vec![b'\\', b'7', b'e'],
-                0x7F..=0xFF => vec![b'\\', to_hex(c >> 4), to_hex(c & 0xf)],
-                _ => vec![c],
-            })
-            .collect(),
-    )
-    .map_err(|_e| LDAPError::NativeError("Error while escaping filter argument".into()))
+    input
+        .bytes()
+        .flat_map(|c| match c {
+            b'\0' => vec![b'\\', b'0', b'0'],
+            b'!' => vec![b'\\', b'2', b'1'],
+            b'&' => vec![b'\\', b'2', b'6'],
+            b'(' => vec![b'\\', b'2', b'8'],
+            b')' => vec![b'\\', b'2', b'9'],
+            b'*' => vec![b'\\', b'2', b'a'],
+            b'\\' => vec![b'\\', b'5', b'c'],
+            b':' => vec![b'\\', b'3', b'a'],
+            b'|' => vec![b'\\', b'7', b'c'],
+            b'~' => vec![b'\\', b'7', b'e'],
+            0x7F..=0xFF => vec![b'\\', to_hex(c >> 4), to_hex(c & 0xf)],
+            _ => vec![c],
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-
     use std::ptr;
     use {codes, escape_filter_assertion_value};
 
@@ -785,10 +783,10 @@ mod tests {
 
         let input_b = "thisshouldnotbealtered...[][]---,;;;";
 
-        let filtered_input_a = escape_filter_assertion_value(input_a).unwrap();
-        let filtered_input_b = escape_filter_assertion_value(input_b).unwrap();
+        let filtered_input_a = String::from_utf8(escape_filter_assertion_value(input_a)).unwrap();
+        let filtered_input_b = String::from_utf8(escape_filter_assertion_value(input_b)).unwrap();
         assert_eq!(
-            escape_filter_assertion_value("🌏").unwrap(),
+            String::from_utf8(escape_filter_assertion_value("🌏")).unwrap(),
             r"\f0\9f\8c\8f",
         );
         assert_eq!(expected_filtered_a, filtered_input_a);
