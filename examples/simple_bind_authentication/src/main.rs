@@ -62,6 +62,9 @@ fn do_simple_bind(
 }
 
 fn ldap_dn_lookup(ldap: &RustLDAP, who: &str) -> Result<String, LDAPError> {
+    // First, escape the who parameter to prevent LDAP injection attacks
+    let safe_who = escape_filter_assertion_value(who)?;
+
     // Show all DNs matching the description "Human"
     // ldap_search is a powerful query language, look at
     // https://confluence.atlassian.com/kb/how-to-write-ldap-search-filters-792496933.html
@@ -69,7 +72,7 @@ fn ldap_dn_lookup(ldap: &RustLDAP, who: &str) -> Result<String, LDAPError> {
     //
     // This particular filter allows the user to sign in with either
     // uid or email
-    let filter = format!("(|(uid={})(mail={}))", who, who);
+    let filter = format!("(|(uid={})(mail={}))", safe_who, safe_who);
 
     match ldap.ldap_search(
         "ou=people,dc=planetexpress,dc=com",
@@ -122,11 +125,15 @@ fn main() {
     // In our test scenario, the professor is the manager.
     do_simple_bind(&ldap, ldap_manager_dn, ldap_manager_pass).unwrap();
 
-    if let Ok(fry_dn) = ldap_dn_lookup(&ldap, user_to_authenticate.as_str()) {
-        // Now, perform a bind with the DN we found matching the user attempting to sign in
-        // and the password provided in the authentication request
-        do_simple_bind(&ldap, fry_dn.as_str(), pwd_to_authenticate.as_str()).unwrap();
+    let (dn, passwd, valid) = match ldap_dn_lookup(&ldap, user_to_authenticate.as_str()) {
+        Ok(fry_dn) => (fry_dn, pwd_to_authenticate, true),
+        _ => ("".into(), "".into(), false),
+    };
 
-        println!("Successfully signed in as fry");
+    // We do the simple bind regardless of the user existence, to protect against timing attacks
+    // to probe existing users
+    match do_simple_bind(&ldap, dn.as_str(), passwd.as_str()).is_ok() && valid {
+        true => println!("Successfully signed in as fry"),
+        false => println!("Could not log in"),
     }
 }
