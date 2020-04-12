@@ -126,14 +126,14 @@ fn main() {
     do_simple_bind(&ldap, ldap_manager_dn, ldap_manager_pass).unwrap();
 
     let (dn, passwd, valid) = match ldap_dn_lookup(&ldap, user_to_authenticate.as_str()) {
-        Ok(fry_dn) => (fry_dn, pwd_to_authenticate, true),
+        Ok(dn) => (dn, pwd_to_authenticate, true),
         _ => ("".into(), "".into(), false),
     };
 
     // We do the simple bind regardless of the user existence, to protect against timing attacks
     // to probe existing users
     match do_simple_bind(&ldap, dn.as_str(), passwd.as_str()).is_ok() && valid {
-        true => println!("Successfully signed in as fry"),
+        true => println!("Successfully signed in as {}", dn),
         false => println!("Could not log in"),
     }
 }
