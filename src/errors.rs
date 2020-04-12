@@ -1,9 +1,8 @@
 //! Errors and trait implementations.
 //!
-use std::fmt;
-use std::error;
 use std::convert;
-
+use std::error;
+use std::fmt;
 
 /// A LDAP error.
 ///
@@ -40,7 +39,7 @@ impl error::Error for LDAPError {
     ///
     /// Note, currently this method always return `None` as we do not know the root cause of the
     /// error.
-    fn cause(&self) -> Option<&error::Error> {
+    fn cause(&self) -> Option<&dyn error::Error> {
         None
     }
 }
