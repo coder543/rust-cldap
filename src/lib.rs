@@ -514,17 +514,28 @@ impl RustLDAP {
 /// }
 /// ```
 pub fn escape_filter_assertion_value(input: &str) -> Result<String, LDAPError> {
+    fn to_hex(byte: u8) -> u8 {
+        match byte {
+            0..=9 => b'0' + byte,
+            _ => b'a' + byte - 10,
+        }
+    }
+
     String::from_utf8(
         input
-            .escape_default()
-            .to_string()
             .bytes()
             .flat_map(|c| match c {
                 b'\0' => vec![b'\\', b'0', b'0'],
+                b'!' => vec![b'\\', b'2', b'1'],
+                b'&' => vec![b'\\', b'2', b'6'],
                 b'(' => vec![b'\\', b'2', b'8'],
                 b')' => vec![b'\\', b'2', b'9'],
                 b'*' => vec![b'\\', b'2', b'a'],
                 b'\\' => vec![b'\\', b'5', b'c'],
+                b':' => vec![b'\\', b'3', b'a'],
+                b'|' => vec![b'\\', b'7', b'c'],
+                b'~' => vec![b'\\', b'7', b'e'],
+                0x7F..=0xFF => vec![b'\\', to_hex(c >> 4), to_hex(c & 0xf)],
                 _ => vec![c],
             })
             .collect(),
@@ -769,15 +780,17 @@ mod tests {
 
     #[test]
     fn test_search_filter_escapation() {
-        let input_a =
-            r"*\doesnotmatter)(isMemberOf=cn=admins,ou=groups,ou=example,ou=org)(doesnotmatter=";
-        let expected_filtered_a = r"\2a\5c\5cdoesnotmatter\29\28isMemberOf=cn=admins,ou=groups,ou=example,ou=org\29\28doesnotmatter=";
+        let input_a = r"*\)(&!|~unaltered";
+        let expected_filtered_a = r"\2a\5c\29\28\26\21\7c\7eunaltered";
 
         let input_b = "thisshouldnotbealtered...[][]---,;;;";
 
         let filtered_input_a = escape_filter_assertion_value(input_a).unwrap();
         let filtered_input_b = escape_filter_assertion_value(input_b).unwrap();
-
+        assert_eq!(
+            escape_filter_assertion_value("🌏").unwrap(),
+            r"\f0\9f\8c\8f",
+        );
         assert_eq!(expected_filtered_a, filtered_input_a);
         assert_eq!(input_b, filtered_input_b);
     }
