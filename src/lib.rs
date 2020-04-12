@@ -6,13 +6,11 @@
 extern crate libc;
 use errors::LDAPError;
 use libc::{c_char, c_int, c_void, timeval};
+use std::boxed;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
-use std::iter::{FlatMap, FromIterator};
 use std::ptr;
-use std::ptr::null_mut;
 use std::slice;
-use std::{ascii, boxed};
 
 pub mod codes;
 pub mod errors;
@@ -531,7 +529,7 @@ pub fn escape_filter_assertion_value(input: &str) -> Result<String, LDAPError> {
             })
             .collect(),
     )
-    .map_err(|e| LDAPError::NativeError("Error while escaping filter argument".into()))
+    .map_err(|_e| LDAPError::NativeError("Error while escaping filter argument".into()))
 }
 
 #[cfg(test)]
@@ -590,7 +588,7 @@ mod tests {
         let ldap = super::RustLDAP::new(TEST_ADDRESS).unwrap();
 
         assert!(ldap.set_option(codes::options::LDAP_OPT_PROTOCOL_VERSION, &3));
-        ldap.start_tls(None, None);
+        ldap.start_tls(None, None).unwrap();
 
         ldap.set_option(
             codes::options::LDAP_OPT_PROTOCOL_VERSION,
